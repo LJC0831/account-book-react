@@ -22,6 +22,22 @@ const formatCurrency = (value) =>
 
 const getMonthKey = (dateString) => dateString.slice(0, 7);
 
+const getMonthLastDay = (monthKey) => {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(year, month, 0).getDate();
+};
+
+const shiftMonthKey = (monthKey, offset) => {
+  const [year, month] = monthKey.split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const formatMonthLabel = (monthKey) => {
+  const [year, month] = monthKey.split("-");
+  return `${year}년 ${Number(month)}월`;
+};
+
 const parseAmount = (value) => Number(String(value).replaceAll(",", ""));
 
 const formatAmountInput = (value) => {
@@ -291,6 +307,10 @@ function App() {
   });
   const [selectedMonth, setSelectedMonth] = useState(today.slice(0, 7));
   const [filterType, setFilterType] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [searchText, setSearchText] = useState("");
+  const [sortOrder, setSortOrder] = useState("latest");
+  const [isTransactionsOpen, setIsTransactionsOpen] = useState(true);
   const [entryRows, setEntryRows] = useState(() => [createEntryRow(), createEntryRow(), createEntryRow()]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
@@ -335,6 +355,19 @@ function App() {
     () => getMonthlyFixedTransactions(fixedItems, selectedMonth),
     [fixedItems, selectedMonth],
   );
+  const fixedExpenseTotal = fixedMonthTransactions
+    .filter((transaction) => transaction.type === "expense")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const previousMonth = shiftMonthKey(selectedMonth, -1);
+
+  const previousMonthTransactions = useMemo(
+    () => [
+      ...getMonthlyFixedTransactions(fixedItems, previousMonth),
+      ...transactions.filter((transaction) => getMonthKey(transaction.date) === previousMonth),
+    ],
+    [fixedItems, transactions, previousMonth],
+  );
 
   const monthAllTransactions = useMemo(
     () => [
@@ -345,11 +378,35 @@ function App() {
   );
 
   const monthTransactions = useMemo(
-    () =>
-      monthAllTransactions
-        .filter((transaction) => filterType === "all" || transaction.type === filterType)
-        .sort((a, b) => b.date.localeCompare(a.date)),
-    [monthAllTransactions, filterType],
+    () => {
+      const normalizedSearch = searchText.trim().toLowerCase();
+
+      return monthAllTransactions
+        .filter((transaction) => {
+          if (filterType !== "all" && transaction.type !== filterType) return false;
+          if (filterCategory !== "all" && transaction.category !== filterCategory) return false;
+          if (!normalizedSearch) return true;
+
+          const searchableText = [
+            transaction.date,
+            transaction.type === "income" ? "수입" : "지출",
+            transaction.category,
+            transaction.memo,
+            String(transaction.amount),
+            formatAmountInput(transaction.amount),
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          return searchableText.includes(normalizedSearch);
+        })
+        .sort((a, b) => {
+          if (sortOrder === "amount-desc") return b.amount - a.amount;
+          if (sortOrder === "amount-asc") return a.amount - b.amount;
+          return b.date.localeCompare(a.date);
+        });
+    },
+    [monthAllTransactions, filterType, filterCategory, searchText, sortOrder],
   );
 
   const summary = useMemo(() => {
@@ -362,6 +419,16 @@ function App() {
     );
   }, [monthAllTransactions]);
 
+  const previousSummary = useMemo(() => {
+    return previousMonthTransactions.reduce(
+      (acc, transaction) => {
+        acc[transaction.type] += transaction.amount;
+        return acc;
+      },
+      { income: 0, expense: 0 },
+    );
+  }, [previousMonthTransactions]);
+
   const categoryTotals = useMemo(() => {
     return monthAllTransactions
       .filter((transaction) => transaction.type === "expense")
@@ -370,6 +437,15 @@ function App() {
         return acc;
       }, {});
   }, [monthAllTransactions]);
+
+  const previousCategoryTotals = useMemo(() => {
+    return previousMonthTransactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((acc, transaction) => {
+        acc[transaction.category] = (acc[transaction.category] || 0) + transaction.amount;
+        return acc;
+      }, {});
+  }, [previousMonthTransactions]);
 
   const categorySummary = useMemo(() => {
     return Object.entries(categoryTotals)
@@ -382,9 +458,56 @@ function App() {
   const totalBudget = categories.expense.reduce((sum, category) => sum + (Number(selectedMonthBudgets[category]) || 0), 0);
   const budgetRemaining = totalBudget > 0 ? totalBudget - summary.expense : 0;
   const budgetUsageRate = totalBudget > 0 ? Math.min((summary.expense / totalBudget) * 100, 100) : 0;
+  const previousMonthBudgets = budgets[previousMonth] || {};
+  const previousTotalBudget = categories.expense.reduce((sum, category) => sum + (Number(previousMonthBudgets[category]) || 0), 0);
+  const previousBudgetRemaining = previousTotalBudget > 0 ? previousTotalBudget - previousSummary.expense : 0;
+  const selectedMonthLastDay = getMonthLastDay(selectedMonth);
+  const currentMonth = today.slice(0, 7);
+  const variableExpenseTotal = Math.max(summary.expense - fixedExpenseTotal, 0);
+  const fixedExpenseRate = summary.expense > 0 ? (fixedExpenseTotal / summary.expense) * 100 : 0;
+  const remainingDays =
+    selectedMonth < currentMonth
+      ? 0
+      : selectedMonth === currentMonth
+        ? Math.max(selectedMonthLastDay - Number(today.slice(8, 10)) + 1, 0)
+        : selectedMonthLastDay;
+  const dailyAvailableAmount = remainingDays > 0 && budgetRemaining > 0 ? Math.floor(budgetRemaining / remainingDays) : 0;
   const spendingRate = summary.income > 0 ? Math.min((summary.expense / summary.income) * 100, 100) : 0;
   const maxCategoryAmount = Math.max(...categorySummary.map((item) => item.amount), 1);
   const topCategory = categorySummary[0];
+  const budgetAlerts = categories.expense
+    .map((category) => {
+      const budget = Number(selectedMonthBudgets[category]) || 0;
+      const spent = categoryTotals[category] || 0;
+      const usage = budget > 0 ? (spent / budget) * 100 : 0;
+      return {
+        category,
+        budget,
+        spent,
+        usage,
+        overAmount: spent - budget,
+      };
+    })
+    .filter((item) => item.budget > 0 && (item.overAmount > 0 || item.usage >= 80))
+    .sort((a, b) => {
+      if (a.overAmount > 0 && b.overAmount <= 0) return -1;
+      if (a.overAmount <= 0 && b.overAmount > 0) return 1;
+      return b.usage - a.usage;
+    });
+  const mostIncreasedCategory = categories.expense
+    .map((category) => ({
+      category,
+      amount: (categoryTotals[category] || 0) - (previousCategoryTotals[category] || 0),
+    }))
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount)[0];
+  const mostOverBudgetCategory = categories.expense
+    .map((category) => ({
+      category,
+      amount: (categoryTotals[category] || 0) - (Number(selectedMonthBudgets[category]) || 0),
+    }))
+    .filter((item) => item.amount > 0 && Number(selectedMonthBudgets[item.category]) > 0)
+    .sort((a, b) => b.amount - a.amount)[0];
 
   const validEntryRows = getValidRows(entryRows);
 
@@ -437,6 +560,19 @@ function App() {
       localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(nextBudgets));
       return nextBudgets;
     });
+  };
+
+  const handleCopyPreviousBudget = () => {
+    const sourceBudgets = budgets[previousMonth] || {};
+    if (Object.keys(sourceBudgets).length === 0) return;
+
+    const nextBudgets = {
+      ...budgets,
+      [selectedMonth]: { ...sourceBudgets },
+    };
+
+    setBudgets(nextBudgets);
+    localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(nextBudgets));
   };
 
   const resetUploadState = () => {
@@ -1109,11 +1245,20 @@ function App() {
       <section className="toolbar">
         <label className="month-picker">
           <span>조회 월</span>
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(event) => setSelectedMonth(event.target.value)}
-          />
+          <div className="month-stepper">
+            <button type="button" aria-label="이전 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, -1))}>
+              ‹
+            </button>
+            <input
+              type="month"
+              value={selectedMonth}
+              aria-label={formatMonthLabel(selectedMonth)}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+            />
+            <button type="button" aria-label="다음 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, 1))}>
+              ›
+            </button>
+          </div>
         </label>
         <button className="primary-button compact" type="button" onClick={() => navigateTo("entry")}>
           내역 추가
@@ -1129,6 +1274,64 @@ function App() {
         <SummaryCard title="지출" value={summary.expense} tone="expense" caption="이번 달 사용한 금액" />
         <SummaryCard title="잔액" value={balance} tone={balance >= 0 ? "income" : "expense"} caption="남은 현금 흐름" />
         <SummaryCard title="예산 잔액" value={budgetRemaining} tone={budgetRemaining >= 0 ? "income" : "expense"} caption="설정 예산에서 지출 차감" />
+      </section>
+
+      <section className="comparison-grid" aria-label="전월 대비 비교">
+        <ComparisonCard
+          title="수입 비교"
+          current={summary.income}
+          previous={previousSummary.income}
+          caption={`${formatMonthLabel(previousMonth)} 대비`}
+        />
+        <ComparisonCard
+          title="지출 비교"
+          current={summary.expense}
+          previous={previousSummary.expense}
+          caption={`${formatMonthLabel(previousMonth)} 대비`}
+          inverse
+        />
+        <ComparisonCard
+          title="예산 잔액 비교"
+          current={budgetRemaining}
+          previous={previousBudgetRemaining}
+          caption={`${formatMonthLabel(previousMonth)} 대비`}
+        />
+      </section>
+
+      <section className="panel report-panel">
+        <div className="panel-title report-title">
+          <div>
+            <p>Monthly Report</p>
+            <h2>{formatMonthLabel(selectedMonth)} 리포트</h2>
+          </div>
+        </div>
+        <div className="report-grid">
+          <ReportItem
+            label="최다 지출 카테고리"
+            value={topCategory ? topCategory.category : "-"}
+            detail={topCategory ? formatCurrency(topCategory.amount) : "지출 내역 없음"}
+          />
+          <ReportItem
+            label="전월 대비 증가"
+            value={mostIncreasedCategory ? mostIncreasedCategory.category : "-"}
+            detail={mostIncreasedCategory ? `+${formatCurrency(mostIncreasedCategory.amount)}` : "증가한 카테고리 없음"}
+          />
+          <ReportItem
+            label="예산 초과 항목"
+            value={mostOverBudgetCategory ? mostOverBudgetCategory.category : "-"}
+            detail={mostOverBudgetCategory ? `${formatCurrency(mostOverBudgetCategory.amount)} 초과` : "초과 항목 없음"}
+          />
+          <ReportItem
+            label="고정 지출 비중"
+            value={`${fixedExpenseRate.toFixed(1)}%`}
+            detail={
+              fixedExpenseRate >= 50
+                ? `${formatCurrency(fixedExpenseTotal)} 고정비 주의`
+                : `${formatCurrency(fixedExpenseTotal)} / 변동 ${formatCurrency(variableExpenseTotal)}`
+            }
+            tone={fixedExpenseRate >= 50 ? "warning" : "normal"}
+          />
+        </div>
       </section>
 
       <section className="analytics-grid">
@@ -1188,9 +1391,19 @@ function App() {
             <p>Monthly Budget</p>
             <h2>카테고리별 예산 설정</h2>
           </div>
-          <div className="budget-total">
-            <span>총 예산</span>
-            <strong>{formatCurrency(totalBudget)}</strong>
+          <div className="budget-header-actions">
+            <button
+              className="ghost-button compact"
+              type="button"
+              disabled={Object.keys(previousMonthBudgets).length === 0}
+              onClick={handleCopyPreviousBudget}
+            >
+              전월 예산 복사
+            </button>
+            <div className="budget-total">
+              <span>총 예산</span>
+              <strong>{formatCurrency(totalBudget)}</strong>
+            </div>
           </div>
         </div>
 
@@ -1207,6 +1420,41 @@ function App() {
               ? `${formatCurrency(summary.expense)} 사용 / ${formatCurrency(Math.max(budgetRemaining, 0))} 남음`
               : "카테고리별 예산을 입력하면 사용률이 표시됩니다."}
           </small>
+        </div>
+
+        <div className="budget-signal-grid">
+          <article className="daily-budget-card">
+            <span>하루 사용 가능 금액</span>
+            <strong>{formatCurrency(dailyAvailableAmount)}</strong>
+            <small>
+              {remainingDays > 0
+                ? `${formatMonthLabel(selectedMonth)} 남은 ${remainingDays}일 기준`
+                : "지난 월은 계산하지 않습니다."}
+            </small>
+          </article>
+
+          <article className="budget-alert-card">
+            <div>
+              <span>예산 경고</span>
+              <strong>{budgetAlerts.length > 0 ? `${budgetAlerts.length}개 항목` : "안정적"}</strong>
+            </div>
+            {budgetAlerts.length === 0 ? (
+              <p>초과했거나 80% 이상 사용한 카테고리가 없습니다.</p>
+            ) : (
+              <div className="budget-alert-list">
+                {budgetAlerts.slice(0, 4).map((item) => (
+                  <div className={item.overAmount > 0 ? "over" : "warning"} key={item.category}>
+                    <strong>{item.category}</strong>
+                    <span>
+                      {item.overAmount > 0
+                        ? `${formatCurrency(item.overAmount)} 초과`
+                        : `${item.usage.toFixed(0)}% 사용`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </article>
         </div>
 
         <div className="budget-grid">
@@ -1249,60 +1497,104 @@ function App() {
             <p>History</p>
             <h2>최근 거래 내역</h2>
           </div>
-          <div className="filter-buttons" aria-label="거래 유형 필터">
-            <button type="button" className={filterType === "all" ? "active" : ""} onClick={() => setFilterType("all")}>
-              전체
-            </button>
-            <button type="button" className={filterType === "expense" ? "active" : ""} onClick={() => setFilterType("expense")}>
-              지출
-            </button>
-            <button type="button" className={filterType === "income" ? "active" : ""} onClick={() => setFilterType("income")}>
-              수입
-            </button>
-          </div>
+          <button className="collapse-button" type="button" onClick={() => setIsTransactionsOpen((open) => !open)}>
+            {isTransactionsOpen ? "접기" : `펼치기 (${monthTransactions.length})`}
+          </button>
         </div>
 
-        <div className="transaction-list">
-          {monthTransactions.length === 0 ? (
-            <p className="empty">조건에 맞는 내역이 없습니다.</p>
-          ) : (
-            monthTransactions.map((transaction) => (
-              <article className="transaction-item" key={transaction.id}>
-                <div className="transaction-main">
-                  <span className={`type-dot ${transaction.type}`} />
-                  <div>
-                    <strong>{transaction.category}</strong>
-                    <p>
-                      {transaction.fixed ? "고정 항목 / " : ""}
-                      {transaction.date}
-                      {transaction.memo ? ` / ${transaction.memo}` : ""}
-                    </p>
+        {isTransactionsOpen ? (
+          <>
+          <div className="transaction-filter-panel">
+            <div className="filter-buttons" aria-label="거래 유형 필터">
+              <button type="button" className={filterType === "all" ? "active" : ""} onClick={() => setFilterType("all")}>
+                전체
+              </button>
+              <button type="button" className={filterType === "expense" ? "active" : ""} onClick={() => setFilterType("expense")}>
+                지출
+              </button>
+              <button type="button" className={filterType === "income" ? "active" : ""} onClick={() => setFilterType("income")}>
+                수입
+              </button>
+            </div>
+            <div className="transaction-filter-grid">
+              <label>
+                검색
+                <input
+                  type="search"
+                  placeholder="메모, 카테고리, 금액"
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                />
+              </label>
+              <label>
+                카테고리
+                <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+                  <option value="all">전체 카테고리</option>
+                  {[...new Set([...categories.expense, ...categories.income])].map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                정렬
+                <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+                  <option value="latest">최신순</option>
+                  <option value="amount-desc">금액 높은순</option>
+                  <option value="amount-asc">금액 낮은순</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="transaction-list">
+            {monthTransactions.length === 0 ? (
+              <p className="empty">조건에 맞는 내역이 없습니다.</p>
+            ) : (
+              monthTransactions.map((transaction) => (
+                <article className="transaction-item" key={transaction.id}>
+                  <div className="transaction-main">
+                    <span className={`type-dot ${transaction.type}`} />
+                    <div>
+                      <strong>{transaction.category}</strong>
+                      <p>
+                        {transaction.fixed ? "고정 항목 / " : ""}
+                        {transaction.date}
+                        {transaction.memo ? ` / ${transaction.memo}` : ""}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="transaction-side">
-                  <strong className={transaction.type}>
-                    {transaction.type === "expense" ? "-" : "+"}
-                    {formatCurrency(transaction.amount)}
-                  </strong>
-                  {transaction.fixed ? (
-                    <button type="button" onClick={() => navigateTo("fixed")}>
-                      관리
-                    </button>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => openEditModal(transaction)}>
-                        수정
+                  <div className="transaction-side">
+                    <strong className={transaction.type}>
+                      {transaction.type === "expense" ? "-" : "+"}
+                      {formatCurrency(transaction.amount)}
+                    </strong>
+                    {transaction.fixed ? (
+                      <button type="button" onClick={() => navigateTo("fixed")}>
+                        관리
                       </button>
-                      <button type="button" onClick={() => handleDelete(transaction.id)}>
-                        삭제
-                      </button>
-                    </>
-                  )}
-                </div>
-              </article>
-            ))
-          )}
-        </div>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => openEditModal(transaction)}>
+                          수정
+                        </button>
+                        <button type="button" onClick={() => handleDelete(transaction.id)}>
+                          삭제
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+          </>
+        ) : (
+          <p className="collapsed-summary">
+            현재 조건에 맞는 거래 {monthTransactions.length}개가 접혀 있습니다.
+          </p>
+        )}
       </section>
 
       {editingTransaction ? (
@@ -1392,6 +1684,38 @@ function SummaryCard({ title, value, tone, caption }) {
       <span>{title}</span>
       <strong>{formatCurrency(value)}</strong>
       <small>{caption}</small>
+    </article>
+  );
+}
+
+function ComparisonCard({ title, current, previous, caption, inverse = false }) {
+  const diff = current - previous;
+  const isPositive = diff > 0;
+  const isNegative = diff < 0;
+  const tone = inverse
+    ? isPositive ? "bad" : isNegative ? "good" : "neutral"
+    : isPositive ? "good" : isNegative ? "bad" : "neutral";
+
+  return (
+    <article className="comparison-card">
+      <div>
+        <span>{title}</span>
+        <strong>{formatCurrency(current)}</strong>
+      </div>
+      <small>{caption}</small>
+      <p className={tone}>
+        {diff === 0 ? "전월과 동일" : `전월 대비 ${isPositive ? "+" : "-"}${formatCurrency(Math.abs(diff))}`}
+      </p>
+    </article>
+  );
+}
+
+function ReportItem({ label, value, detail, tone = "normal" }) {
+  return (
+    <article className={`report-item ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
     </article>
   );
 }
