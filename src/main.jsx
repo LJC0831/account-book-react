@@ -507,9 +507,12 @@ function App() {
     return acc;
   }, { income: 0, expense: 0 });
 
-  const latestManualTransactions = useMemo(
-    () => transactions.slice(0, 5),
-    [transactions],
+  const selectedMonthManualTransactions = useMemo(
+    () =>
+      transactions
+        .filter((transaction) => getMonthKey(transaction.date) === selectedMonth)
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [transactions, selectedMonth],
   );
 
   const validFixedRows = fixedRows.filter((row) => {
@@ -776,6 +779,16 @@ function App() {
 
   const handleDelete = (id) => {
     saveTransactions(transactions.filter((transaction) => transaction.id !== id));
+  };
+
+  const handleDeleteSelectedMonthTransactions = () => {
+    if (selectedMonthManualTransactions.length === 0) return;
+
+    const confirmed = window.confirm(`${formatMonthLabel(selectedMonth)} 저장 내역 ${selectedMonthManualTransactions.length}건을 모두 삭제할까요?`);
+    if (!confirmed) return;
+
+    saveTransactions(transactions.filter((transaction) => getMonthKey(transaction.date) !== selectedMonth));
+    setLastSavedRows([]);
   };
 
   const openEditModal = (transaction) => {
@@ -1072,31 +1085,59 @@ function App() {
             <SummaryCard title="이번 달 지출" value={summary.expense} tone="expense" caption="저장된 지출 합계" />
             <SummaryCard title="입력 예정 수입" value={draftTotal.income} tone="income" caption="현재 표에 입력된 수입" />
             <SummaryCard title="입력 예정 지출" value={draftTotal.expense} tone="expense" caption="현재 표에 입력된 지출" />
-            {lastSavedRows.length > 0 || latestManualTransactions.length > 0 ? (
-              <section className="panel recent-save-panel">
-                <div className="panel-title">
-                  <div>
-                    <p>{lastSavedRows.length > 0 ? "Last Save" : "Saved History"}</p>
-                    <h2>{lastSavedRows.length > 0 ? "방금 저장한 내역" : "저장된 최근 내역"}</h2>
-                  </div>
+            <section className="panel recent-save-panel">
+              <div className="panel-title saved-history-title">
+                <div>
+                  <p>Saved History</p>
+                  <h2>{formatMonthLabel(selectedMonth)} 저장 내역</h2>
                 </div>
-                <div className="recent-save-list">
-                  {(lastSavedRows.length > 0 ? lastSavedRows : latestManualTransactions).map((row) => (
-                    <div className="recent-save-item" key={row.id}>
-                      <span>{row.date}</span>
-                      <strong>
-                        {row.type === "income" ? "+" : "-"}
-                        {formatCurrency(row.amount)}
-                      </strong>
-                      <small>
-                        {row.category}
-                        {row.memo ? ` / ${row.memo}` : ""}
-                      </small>
+                <button
+                  className="danger-button compact"
+                  type="button"
+                  disabled={selectedMonthManualTransactions.length === 0}
+                  onClick={handleDeleteSelectedMonthTransactions}
+                >
+                  전체삭제
+                </button>
+              </div>
+              <label className="saved-history-month">
+                조회 월
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(event) => setSelectedMonth(event.target.value)}
+                />
+              </label>
+              {lastSavedRows.length > 0 ? (
+                <div className="recent-save-notice">
+                  방금 저장한 내역 {lastSavedRows.length}건이 반영되었습니다.
+                </div>
+              ) : null}
+              <div className="recent-save-list saved-history-list">
+                {selectedMonthManualTransactions.length === 0 ? (
+                  <p className="empty">저장된 내역이 없습니다.</p>
+                ) : (
+                  selectedMonthManualTransactions.map((row) => (
+                    <div className="recent-save-item saved-history-item" key={row.id}>
+                      <div>
+                        <span>{row.date}</span>
+                        <strong>
+                          {row.type === "income" ? "+" : "-"}
+                          {formatCurrency(row.amount)}
+                        </strong>
+                        <small>
+                          {row.category}
+                          {row.memo ? ` / ${row.memo}` : ""}
+                        </small>
+                      </div>
+                      <button type="button" onClick={() => handleDelete(row.id)}>
+                        삭제
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
+                  ))
+                )}
+              </div>
+            </section>
           </aside>
         </section>
 

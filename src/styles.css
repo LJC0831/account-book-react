@@ -867,9 +867,34 @@ h2 {
   gap: 12px;
 }
 
+.saved-history-title {
+  align-items: start;
+  margin-bottom: 0;
+}
+
+.saved-history-month {
+  gap: 6px;
+}
+
+.recent-save-notice {
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #0f766e;
+  background: #f0fdfa;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .recent-save-list {
   display: grid;
   gap: 10px;
+}
+
+.saved-history-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .recent-save-item {
@@ -879,6 +904,28 @@ h2 {
   border-radius: 10px;
   padding: 12px;
   background: #ffffff;
+}
+
+.saved-history-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.saved-history-item button {
+  min-height: 32px;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  padding: 0 10px;
+  color: #b91c1c;
+  background: #fff5f5;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.saved-history-item button:hover {
+  border-color: rgba(185, 28, 28, 0.4);
+  background: #fee2e2;
 }
 
 .recent-save-item span,
@@ -938,6 +985,7 @@ h2 {
 .primary-button,
 .save-button,
 .ghost-button,
+.danger-button,
 .icon-button,
 .fixed-action-button {
   min-height: 46px;
@@ -991,7 +1039,25 @@ h2 {
   color: #0f766e;
 }
 
-.ghost-button:disabled {
+.danger-button {
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  background: #fff5f5;
+}
+
+.danger-button.compact {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.danger-button:hover {
+  border-color: rgba(185, 28, 28, 0.42);
+  background: #fee2e2;
+}
+
+.ghost-button:disabled,
+.danger-button:disabled {
   cursor: not-allowed;
   color: #94a3b8;
   background: #f1f5f9;
