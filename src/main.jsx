@@ -7,7 +7,7 @@ const FIXED_STORAGE_KEY = "basic-budget-fixed-transactions";
 const BUDGET_STORAGE_KEY = "basic-budget-monthly-budgets";
 
 const categories = {
-  expense: ["식비", "교통", "쇼핑", "주거", "통신", "문화", "의료", "보험", "저축", "기타"],
+  expense: ["식비", "교통", "쇼핑", "주거", "통신", "문화", "의료", "보험", "저축", "카드사용", "기타"],
   income: ["급여", "용돈", "부수입", "이자", "기타"],
 };
 
@@ -133,15 +133,6 @@ const isHeaderRow = (row) => {
   const values = row.map((cell) => String(cell).trim());
   return ["날짜", "거래일자", "일자"].some((name) => values.includes(name));
 };
-
-const getTransactionKey = (transaction) =>
-  [
-    transaction.date,
-    transaction.type,
-    transaction.category,
-    parseAmount(transaction.amount),
-    String(transaction.memo || "").trim(),
-  ].join("|");
 
 const getValidRows = (rows) =>
   rows.filter((row) => {
@@ -319,7 +310,6 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [uploadPreview, setUploadPreview] = useState({
     rows: [],
-    duplicates: [],
     invalidRows: [],
   });
 
@@ -577,7 +567,7 @@ function App() {
 
   const resetUploadState = () => {
     setUploadMessage("");
-    setUploadPreview({ rows: [], duplicates: [], invalidRows: [] });
+    setUploadPreview({ rows: [], invalidRows: [] });
   };
 
   const closeUploadModal = () => {
@@ -675,32 +665,12 @@ function App() {
             sourceRow: hasHeader ? index + 2 : index + 1,
           };
         });
-      const validRows = parsedRows.filter((row) => row.date && parseAmount(row.amount) > 0);
+      const nextRows = parsedRows.filter((row) => row.date && parseAmount(row.amount) > 0);
       const invalidRows = parsedRows.filter((row) => !row.date || parseAmount(row.amount) <= 0);
-      const existingKeys = new Set([
-        ...transactions.map(getTransactionKey),
-      ]);
-      const uploadKeys = new Set();
-      const nextRows = [];
-      const duplicates = [];
 
-      validRows.forEach((row) => {
-        const key = getTransactionKey(row);
-        if (existingKeys.has(key) || uploadKeys.has(key)) {
-          duplicates.push({
-            ...row,
-            duplicateReason: existingKeys.has(key) ? "이미 저장됨" : "파일 내 중복",
-          });
-          return;
-        }
+      setUploadPreview({ rows: nextRows, invalidRows });
 
-        uploadKeys.add(key);
-        nextRows.push(row);
-      });
-
-      setUploadPreview({ rows: nextRows, duplicates, invalidRows });
-
-      if (validRows.length === 0) {
+      if (nextRows.length === 0) {
         const hasAnyDate = parsedRows.some((row) => row.date);
         const hasAnyAmount = parsedRows.some((row) => parseAmount(row.amount) > 0);
         const reason = !hasAnyDate
@@ -713,7 +683,7 @@ function App() {
       }
 
       setUploadMessage(
-        `가져오기 가능 ${nextRows.length}건, 중복 ${duplicates.length}건, 오류 ${invalidRows.length}건을 확인했습니다.`,
+        `가져오기 가능 ${nextRows.length}건, 오류 ${invalidRows.length}건을 확인했습니다.`,
       );
     } catch {
       setUploadMessage("엑셀 파일을 읽지 못했습니다. .xlsx 파일인지 확인해주세요.");
@@ -1160,11 +1130,10 @@ function App() {
 
               {uploadMessage ? <p className="upload-message">{uploadMessage}</p> : null}
 
-              {uploadPreview.rows.length > 0 || uploadPreview.duplicates.length > 0 || uploadPreview.invalidRows.length > 0 ? (
+              {uploadPreview.rows.length > 0 || uploadPreview.invalidRows.length > 0 ? (
                 <div className="upload-preview">
                   <div className="preview-summary">
                     <span>반영 가능 {uploadPreview.rows.length}</span>
-                    <span>중복 {uploadPreview.duplicates.length}</span>
                     <span>오류 {uploadPreview.invalidRows.length}</span>
                   </div>
 
@@ -1192,17 +1161,6 @@ function App() {
                           ))}
                         </tbody>
                       </table>
-                    </div>
-                  ) : null}
-
-                  {uploadPreview.duplicates.length > 0 ? (
-                    <div className="preview-duplicate-list">
-                      <strong>중복으로 제외된 내역</strong>
-                      {uploadPreview.duplicates.slice(0, 5).map((row) => (
-                        <p key={row.id}>
-                          {row.sourceRow}행 / {row.date} / {row.type === "income" ? "수입" : "지출"} / {row.amount} / {row.duplicateReason}
-                        </p>
-                      ))}
                     </div>
                   ) : null}
 
