@@ -4,9 +4,10 @@ import "./styles.css";
 
 const STORAGE_KEY = "basic-budget-transactions";
 const FIXED_STORAGE_KEY = "basic-budget-fixed-transactions";
+const BUDGET_STORAGE_KEY = "basic-budget-monthly-budgets";
 
 const categories = {
-  expense: ["식비", "교통", "쇼핑", "주거", "통신", "문화", "의료", "기타"],
+  expense: ["식비", "교통", "쇼핑", "주거", "통신", "문화", "의료", "보험", "저축", "기타"],
   income: ["급여", "용돈", "부수입", "이자", "기타"],
 };
 
@@ -249,6 +250,18 @@ function loadFixedItems() {
   }
 }
 
+function loadBudgets() {
+  const stored = localStorage.getItem(BUDGET_STORAGE_KEY);
+  if (!stored) return {};
+
+  try {
+    const parsed = JSON.parse(stored);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function getMonthlyFixedTransactions(fixedItems, monthKey) {
   const [year, month] = monthKey.split("-").map(Number);
   const lastDay = new Date(year, month, 0).getDate();
@@ -271,6 +284,7 @@ function App() {
   const [page, setPage] = useState(getPageFromLocation);
   const [transactions, setTransactions] = useState(loadTransactions);
   const [fixedItems, setFixedItems] = useState(loadFixedItems);
+  const [budgets, setBudgets] = useState(loadBudgets);
   const [fixedRows, setFixedRows] = useState(() => {
     const storedItems = loadFixedItems();
     return storedItems.length > 0 ? toEditableFixedRows(storedItems) : [createFixedRow()];
@@ -348,20 +362,26 @@ function App() {
     );
   }, [monthAllTransactions]);
 
-  const categorySummary = useMemo(() => {
-    const totals = monthAllTransactions
+  const categoryTotals = useMemo(() => {
+    return monthAllTransactions
       .filter((transaction) => transaction.type === "expense")
       .reduce((acc, transaction) => {
         acc[transaction.category] = (acc[transaction.category] || 0) + transaction.amount;
         return acc;
       }, {});
-
-    return Object.entries(totals)
-      .map(([category, amount], index) => ({ category, amount, color: chartColors[index % chartColors.length] }))
-      .sort((a, b) => b.amount - a.amount);
   }, [monthAllTransactions]);
 
+  const categorySummary = useMemo(() => {
+    return Object.entries(categoryTotals)
+      .map(([category, amount], index) => ({ category, amount, color: chartColors[index % chartColors.length] }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [categoryTotals]);
+
   const balance = summary.income - summary.expense;
+  const selectedMonthBudgets = budgets[selectedMonth] || {};
+  const totalBudget = categories.expense.reduce((sum, category) => sum + (Number(selectedMonthBudgets[category]) || 0), 0);
+  const budgetRemaining = totalBudget > 0 ? totalBudget - summary.expense : 0;
+  const budgetUsageRate = totalBudget > 0 ? Math.min((summary.expense / totalBudget) * 100, 100) : 0;
   const spendingRate = summary.income > 0 ? Math.min((summary.expense / summary.income) * 100, 100) : 0;
   const maxCategoryAmount = Math.max(...categorySummary.map((item) => item.amount), 1);
   const topCategory = categorySummary[0];
@@ -389,6 +409,35 @@ function App() {
     acc[item.type] += Number(item.amount);
     return acc;
   }, { income: 0, expense: 0 });
+
+  const handleBudgetChange = (category, value) => {
+    const amount = parseAmount(value);
+    const nextAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+
+    setBudgets((currentBudgets) => {
+      const currentMonthBudgets = currentBudgets[selectedMonth] || {};
+      const nextMonthBudgets = {
+        ...currentMonthBudgets,
+        [category]: nextAmount,
+      };
+
+      if (nextAmount === 0) {
+        delete nextMonthBudgets[category];
+      }
+
+      const nextBudgets = {
+        ...currentBudgets,
+        [selectedMonth]: nextMonthBudgets,
+      };
+
+      if (Object.keys(nextMonthBudgets).length === 0) {
+        delete nextBudgets[selectedMonth];
+      }
+
+      localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(nextBudgets));
+      return nextBudgets;
+    });
+  };
 
   const resetUploadState = () => {
     setUploadMessage("");
@@ -1079,6 +1128,7 @@ function App() {
         <SummaryCard title="수입" value={summary.income} tone="income" caption="이번 달 들어온 금액" />
         <SummaryCard title="지출" value={summary.expense} tone="expense" caption="이번 달 사용한 금액" />
         <SummaryCard title="잔액" value={balance} tone={balance >= 0 ? "income" : "expense"} caption="남은 현금 흐름" />
+        <SummaryCard title="예산 잔액" value={budgetRemaining} tone={budgetRemaining >= 0 ? "income" : "expense"} caption="설정 예산에서 지출 차감" />
       </section>
 
       <section className="analytics-grid">
@@ -1130,6 +1180,67 @@ function App() {
             <InsightItem label="가장 큰 지출" value={topCategory ? formatCurrency(topCategory.amount) : "-"} />
           </div>
         </aside>
+      </section>
+
+      <section className="panel budget-panel">
+        <div className="panel-title budget-title">
+          <div>
+            <p>Monthly Budget</p>
+            <h2>카테고리별 예산 설정</h2>
+          </div>
+          <div className="budget-total">
+            <span>총 예산</span>
+            <strong>{formatCurrency(totalBudget)}</strong>
+          </div>
+        </div>
+
+        <div className="budget-overview">
+          <div>
+            <span>이번 달 예산 사용률</span>
+            <strong>{totalBudget > 0 ? `${budgetUsageRate.toFixed(1)}%` : "예산 없음"}</strong>
+          </div>
+          <div className="budget-track" aria-label="월 예산 사용률">
+            <span className={summary.expense > totalBudget && totalBudget > 0 ? "over" : ""} style={{ width: `${budgetUsageRate}%` }} />
+          </div>
+          <small>
+            {totalBudget > 0
+              ? `${formatCurrency(summary.expense)} 사용 / ${formatCurrency(Math.max(budgetRemaining, 0))} 남음`
+              : "카테고리별 예산을 입력하면 사용률이 표시됩니다."}
+          </small>
+        </div>
+
+        <div className="budget-grid">
+          {categories.expense.map((category) => {
+            const spent = categoryTotals[category] || 0;
+            const budget = Number(selectedMonthBudgets[category]) || 0;
+            const usage = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+            const isOver = budget > 0 && spent > budget;
+
+            return (
+              <div className="budget-row" key={category}>
+                <label>
+                  <span>{category}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={budget > 0 ? formatAmountInput(budget) : ""}
+                    onChange={(event) => handleBudgetChange(category, event.target.value)}
+                  />
+                </label>
+                <div className="budget-row-meta">
+                  <span>{formatCurrency(spent)}</span>
+                  <strong className={isOver ? "over" : ""}>
+                    {budget > 0 ? (isOver ? `${formatCurrency(spent - budget)} 초과` : `${formatCurrency(budget - spent)} 남음`) : "예산 미설정"}
+                  </strong>
+                </div>
+                <div className="budget-track small" aria-label={`${category} 예산 사용률`}>
+                  <span className={isOver ? "over" : ""} style={{ width: `${usage}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section className="panel transactions-panel">
