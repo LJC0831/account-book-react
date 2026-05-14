@@ -63,25 +63,17 @@ Local routes:
 
 ## Good Next Tasks
 
-1. Category management
-   - Let users add/edit/delete categories.
-   - Persist categories in localStorage.
-
-2. Budget settings
-   - Monthly category budgets.
-   - Show used percentage on dashboard.
-
-3. Monthly trend chart
+1. Monthly trend chart
    - Recent 6 months income/expense/balance.
 
-4. Excel export
+2. Excel export
    - Download saved transactions as `.xlsx`.
 
-5. Search and advanced filters
+3. Search and advanced filters
    - Search by memo/category.
    - Filter by date range, amount range, type.
 
-6. Better Excel upload mapping
+4. Better Excel upload mapping
    - Let users choose which Excel column maps to date/type/category/amount/memo.
 
 ## Recent User Preferences
@@ -92,4 +84,3 @@ Local routes:
 - Buttons should be refined and not look generic.
 - Font changed to `IBM Plex Sans KR` with fallbacks.
 - Fixed item button should be visually distinct.
-

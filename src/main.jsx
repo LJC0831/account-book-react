@@ -4,7 +4,6 @@ import "./styles.css";
 
 const STORAGE_KEY = "basic-budget-transactions";
 const FIXED_STORAGE_KEY = "basic-budget-fixed-transactions";
-const BUDGET_STORAGE_KEY = "basic-budget-monthly-budgets";
 
 const categories = {
   expense: ["식비", "교통", "쇼핑", "주거", "통신", "문화", "의료", "보험", "저축", "카드사용", "기타"],
@@ -21,11 +20,6 @@ const formatCurrency = (value) =>
   }).format(value);
 
 const getMonthKey = (dateString) => dateString.slice(0, 7);
-
-const getMonthLastDay = (monthKey) => {
-  const [year, month] = monthKey.split("-").map(Number);
-  return new Date(year, month, 0).getDate();
-};
 
 const shiftMonthKey = (monthKey, offset) => {
   const [year, month] = monthKey.split("-").map(Number);
@@ -257,18 +251,6 @@ function loadFixedItems() {
   }
 }
 
-function loadBudgets() {
-  const stored = localStorage.getItem(BUDGET_STORAGE_KEY);
-  if (!stored) return {};
-
-  try {
-    const parsed = JSON.parse(stored);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 function getMonthlyFixedTransactions(fixedItems, monthKey) {
   const [year, month] = monthKey.split("-").map(Number);
   const lastDay = new Date(year, month, 0).getDate();
@@ -291,7 +273,6 @@ function App() {
   const [page, setPage] = useState(getPageFromLocation);
   const [transactions, setTransactions] = useState(loadTransactions);
   const [fixedItems, setFixedItems] = useState(loadFixedItems);
-  const [budgets, setBudgets] = useState(loadBudgets);
   const [fixedRows, setFixedRows] = useState(() => {
     const storedItems = loadFixedItems();
     return storedItems.length > 0 ? toEditableFixedRows(storedItems) : [createFixedRow()];
@@ -444,59 +425,17 @@ function App() {
   }, [categoryTotals]);
 
   const balance = summary.income - summary.expense;
-  const selectedMonthBudgets = budgets[selectedMonth] || {};
-  const totalBudget = categories.expense.reduce((sum, category) => sum + (Number(selectedMonthBudgets[category]) || 0), 0);
-  const budgetRemaining = totalBudget > 0 ? totalBudget - summary.expense : 0;
-  const budgetUsageRate = totalBudget > 0 ? Math.min((summary.expense / totalBudget) * 100, 100) : 0;
-  const previousMonthBudgets = budgets[previousMonth] || {};
-  const previousTotalBudget = categories.expense.reduce((sum, category) => sum + (Number(previousMonthBudgets[category]) || 0), 0);
-  const previousBudgetRemaining = previousTotalBudget > 0 ? previousTotalBudget - previousSummary.expense : 0;
-  const selectedMonthLastDay = getMonthLastDay(selectedMonth);
-  const currentMonth = today.slice(0, 7);
   const variableExpenseTotal = Math.max(summary.expense - fixedExpenseTotal, 0);
   const fixedExpenseRate = summary.expense > 0 ? (fixedExpenseTotal / summary.expense) * 100 : 0;
-  const remainingDays =
-    selectedMonth < currentMonth
-      ? 0
-      : selectedMonth === currentMonth
-        ? Math.max(selectedMonthLastDay - Number(today.slice(8, 10)) + 1, 0)
-        : selectedMonthLastDay;
-  const dailyAvailableAmount = remainingDays > 0 && budgetRemaining > 0 ? Math.floor(budgetRemaining / remainingDays) : 0;
   const spendingRate = summary.income > 0 ? Math.min((summary.expense / summary.income) * 100, 100) : 0;
   const maxCategoryAmount = Math.max(...categorySummary.map((item) => item.amount), 1);
   const topCategory = categorySummary[0];
-  const budgetAlerts = categories.expense
-    .map((category) => {
-      const budget = Number(selectedMonthBudgets[category]) || 0;
-      const spent = categoryTotals[category] || 0;
-      const usage = budget > 0 ? (spent / budget) * 100 : 0;
-      return {
-        category,
-        budget,
-        spent,
-        usage,
-        overAmount: spent - budget,
-      };
-    })
-    .filter((item) => item.budget > 0 && (item.overAmount > 0 || item.usage >= 80))
-    .sort((a, b) => {
-      if (a.overAmount > 0 && b.overAmount <= 0) return -1;
-      if (a.overAmount <= 0 && b.overAmount > 0) return 1;
-      return b.usage - a.usage;
-    });
   const mostIncreasedCategory = categories.expense
     .map((category) => ({
       category,
       amount: (categoryTotals[category] || 0) - (previousCategoryTotals[category] || 0),
     }))
     .filter((item) => item.amount > 0)
-    .sort((a, b) => b.amount - a.amount)[0];
-  const mostOverBudgetCategory = categories.expense
-    .map((category) => ({
-      category,
-      amount: (categoryTotals[category] || 0) - (Number(selectedMonthBudgets[category]) || 0),
-    }))
-    .filter((item) => item.amount > 0 && Number(selectedMonthBudgets[item.category]) > 0)
     .sort((a, b) => b.amount - a.amount)[0];
 
   const validEntryRows = getValidRows(entryRows);
@@ -525,48 +464,6 @@ function App() {
     acc[item.type] += Number(item.amount);
     return acc;
   }, { income: 0, expense: 0 });
-
-  const handleBudgetChange = (category, value) => {
-    const amount = parseAmount(value);
-    const nextAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
-
-    setBudgets((currentBudgets) => {
-      const currentMonthBudgets = currentBudgets[selectedMonth] || {};
-      const nextMonthBudgets = {
-        ...currentMonthBudgets,
-        [category]: nextAmount,
-      };
-
-      if (nextAmount === 0) {
-        delete nextMonthBudgets[category];
-      }
-
-      const nextBudgets = {
-        ...currentBudgets,
-        [selectedMonth]: nextMonthBudgets,
-      };
-
-      if (Object.keys(nextMonthBudgets).length === 0) {
-        delete nextBudgets[selectedMonth];
-      }
-
-      localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(nextBudgets));
-      return nextBudgets;
-    });
-  };
-
-  const handleCopyPreviousBudget = () => {
-    const sourceBudgets = budgets[previousMonth] || {};
-    if (Object.keys(sourceBudgets).length === 0) return;
-
-    const nextBudgets = {
-      ...budgets,
-      [selectedMonth]: { ...sourceBudgets },
-    };
-
-    setBudgets(nextBudgets);
-    localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(nextBudgets));
-  };
 
   const resetUploadState = () => {
     setUploadMessage("");
@@ -1272,7 +1169,6 @@ function App() {
         <SummaryCard title="수입" value={summary.income} tone="income" caption="이번 달 들어온 금액" />
         <SummaryCard title="지출" value={summary.expense} tone="expense" caption="이번 달 사용한 금액" />
         <SummaryCard title="잔액" value={balance} tone={balance >= 0 ? "income" : "expense"} caption="남은 현금 흐름" />
-        <SummaryCard title="예산 잔액" value={budgetRemaining} tone={budgetRemaining >= 0 ? "income" : "expense"} caption="설정 예산에서 지출 차감" />
       </section>
 
       <section className="comparison-grid" aria-label="전월 대비 비교">
@@ -1288,12 +1184,6 @@ function App() {
           previous={previousSummary.expense}
           caption={`${formatMonthLabel(previousMonth)} 대비`}
           inverse
-        />
-        <ComparisonCard
-          title="예산 잔액 비교"
-          current={budgetRemaining}
-          previous={previousBudgetRemaining}
-          caption={`${formatMonthLabel(previousMonth)} 대비`}
         />
       </section>
 
@@ -1314,11 +1204,6 @@ function App() {
             label="전월 대비 증가"
             value={mostIncreasedCategory ? mostIncreasedCategory.category : "-"}
             detail={mostIncreasedCategory ? `+${formatCurrency(mostIncreasedCategory.amount)}` : "증가한 카테고리 없음"}
-          />
-          <ReportItem
-            label="예산 초과 항목"
-            value={mostOverBudgetCategory ? mostOverBudgetCategory.category : "-"}
-            detail={mostOverBudgetCategory ? `${formatCurrency(mostOverBudgetCategory.amount)} 초과` : "초과 항목 없음"}
           />
           <ReportItem
             label="고정 지출 비중"
@@ -1382,112 +1267,6 @@ function App() {
             <InsightItem label="가장 큰 지출" value={topCategory ? formatCurrency(topCategory.amount) : "-"} />
           </div>
         </aside>
-      </section>
-
-      <section className="panel budget-panel">
-        <div className="panel-title budget-title">
-          <div>
-            <p>Monthly Budget</p>
-            <h2>카테고리별 예산 설정</h2>
-          </div>
-          <div className="budget-header-actions">
-            <button
-              className="ghost-button compact"
-              type="button"
-              disabled={Object.keys(previousMonthBudgets).length === 0}
-              onClick={handleCopyPreviousBudget}
-            >
-              전월 예산 복사
-            </button>
-            <div className="budget-total">
-              <span>총 예산</span>
-              <strong>{formatCurrency(totalBudget)}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="budget-overview">
-          <div>
-            <span>이번 달 예산 사용률</span>
-            <strong>{totalBudget > 0 ? `${budgetUsageRate.toFixed(1)}%` : "예산 없음"}</strong>
-          </div>
-          <div className="budget-track" aria-label="월 예산 사용률">
-            <span className={summary.expense > totalBudget && totalBudget > 0 ? "over" : ""} style={{ width: `${budgetUsageRate}%` }} />
-          </div>
-          <small>
-            {totalBudget > 0
-              ? `${formatCurrency(summary.expense)} 사용 / ${formatCurrency(Math.max(budgetRemaining, 0))} 남음`
-              : "카테고리별 예산을 입력하면 사용률이 표시됩니다."}
-          </small>
-        </div>
-
-        <div className="budget-signal-grid">
-          <article className="daily-budget-card">
-            <span>하루 사용 가능 금액</span>
-            <strong>{formatCurrency(dailyAvailableAmount)}</strong>
-            <small>
-              {remainingDays > 0
-                ? `${formatMonthLabel(selectedMonth)} 남은 ${remainingDays}일 기준`
-                : "지난 월은 계산하지 않습니다."}
-            </small>
-          </article>
-
-          <article className="budget-alert-card">
-            <div>
-              <span>예산 경고</span>
-              <strong>{budgetAlerts.length > 0 ? `${budgetAlerts.length}개 항목` : "안정적"}</strong>
-            </div>
-            {budgetAlerts.length === 0 ? (
-              <p>초과했거나 80% 이상 사용한 카테고리가 없습니다.</p>
-            ) : (
-              <div className="budget-alert-list">
-                {budgetAlerts.slice(0, 4).map((item) => (
-                  <div className={item.overAmount > 0 ? "over" : "warning"} key={item.category}>
-                    <strong>{item.category}</strong>
-                    <span>
-                      {item.overAmount > 0
-                        ? `${formatCurrency(item.overAmount)} 초과`
-                        : `${item.usage.toFixed(0)}% 사용`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
-        </div>
-
-        <div className="budget-grid">
-          {categories.expense.map((category) => {
-            const spent = categoryTotals[category] || 0;
-            const budget = Number(selectedMonthBudgets[category]) || 0;
-            const usage = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
-            const isOver = budget > 0 && spent > budget;
-
-            return (
-              <div className="budget-row" key={category}>
-                <label>
-                  <span>{category}</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={budget > 0 ? formatAmountInput(budget) : ""}
-                    onChange={(event) => handleBudgetChange(category, event.target.value)}
-                  />
-                </label>
-                <div className="budget-row-meta">
-                  <span>{formatCurrency(spent)}</span>
-                  <strong className={isOver ? "over" : ""}>
-                    {budget > 0 ? (isOver ? `${formatCurrency(spent - budget)} 초과` : `${formatCurrency(budget - spent)} 남음`) : "예산 미설정"}
-                  </strong>
-                </div>
-                <div className="budget-track small" aria-label={`${category} 예산 사용률`}>
-                  <span className={isOver ? "over" : ""} style={{ width: `${usage}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </section>
 
       <section className="panel transactions-panel">
