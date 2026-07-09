@@ -380,9 +380,42 @@ select:focus {
 }
 
 .summary-card span {
-  color: #64748b;
+  color: var(--color-slate-500);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+}
+
+.summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  background: var(--color-slate-100);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.summary-card:hover .summary-icon {
+  transform: scale(1.12);
+}
+
+.income .summary-icon {
+  background: var(--income-light);
+}
+
+.expense .summary-icon {
+  background: var(--expense-light);
 }
 
 .summary-card strong {

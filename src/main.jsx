@@ -1569,10 +1569,27 @@ function App() {
   );
 }
 
+const summaryIcons = {
+  "수입": "📈",
+  "지출": "📉",
+  "잔액": "💰",
+  "이번 달 수입": "📈",
+  "이번 달 지출": "📉",
+  "입력 예정 수입": "💸",
+  "입력 예정 지출": "💸",
+  "고정 수입": "💵",
+  "고정 지출": "💳",
+  "고정 순액": "⚖️"
+};
+
 function SummaryCard({ title, value, tone, caption }) {
+  const icon = summaryIcons[title] || "💰";
   return (
     <article className={`summary-card ${tone}`}>
-      <span>{title}</span>
+      <div className="summary-header">
+        <span>{title}</span>
+        <span className="summary-icon">{icon}</span>
+      </div>
       <strong>{formatCurrency(value)}</strong>
       <small>{caption}</small>
     </article>
