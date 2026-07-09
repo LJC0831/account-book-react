@@ -227,6 +227,54 @@ const sampleTransactions = [
   },
 ];
 
+function MonthlyTrendChart({ data }) {
+  const maxVal = Math.max(...data.flatMap((d) => [d.income, d.expense]), 100000);
+
+  return (
+    <div className="trend-chart-container">
+      <div className="trend-chart-header">
+        <div className="chart-legend">
+          <div className="legend-item">
+            <span className="legend-dot income" />
+            <span className="legend-label">수입</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-dot expense" />
+            <span className="legend-label">지출</span>
+          </div>
+        </div>
+      </div>
+      <div className="trend-chart-bars">
+        {data.map((d) => {
+          const incomeHeight = d.income > 0 ? `${Math.max((d.income / maxVal) * 100, 3)}%` : "0%";
+          const expenseHeight = d.expense > 0 ? `${Math.max((d.expense / maxVal) * 100, 3)}%` : "0%";
+          return (
+            <div className="trend-chart-col" key={d.monthKey}>
+              <div className="trend-bar-track">
+                <div className="trend-bar-wrapper">
+                  <div
+                    className="trend-bar income"
+                    style={{ height: incomeHeight }}
+                  >
+                    <span className="bar-tooltip">수입: {formatCurrency(d.income)}</span>
+                  </div>
+                  <div
+                    className="trend-bar expense"
+                    style={{ height: expenseHeight }}
+                  >
+                    <span className="bar-tooltip">지출: {formatCurrency(d.expense)}</span>
+                  </div>
+                </div>
+              </div>
+              <span className="trend-col-label">{d.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function loadTransactions() {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) return sampleTransactions;
@@ -389,6 +437,33 @@ function App() {
       { income: 0, expense: 0 },
     );
   }, [monthAllTransactions]);
+
+  const monthlyTrendData = useMemo(() => {
+    const trendMonths = [];
+    for (let i = -5; i <= 0; i++) {
+      trendMonths.push(shiftMonthKey(selectedMonth, i));
+    }
+
+    return trendMonths.map((mKey) => {
+      const mTrans = transactions.filter((t) => getMonthKey(t.date) === mKey);
+      const mFixed = getMonthlyFixedTransactions(fixedItems, mKey);
+
+      const totalIncome = [...mTrans, ...mFixed]
+        .filter((t) => t.type === "income")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const totalExpense = [...mTrans, ...mFixed]
+        .filter((t) => t.type === "expense")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      return {
+        monthKey: mKey,
+        label: `${Number(mKey.split("-")[1])}월`,
+        income: totalIncome,
+        expense: totalExpense,
+      };
+    });
+  }, [transactions, fixedItems, selectedMonth]);
 
   const previousSummary = useMemo(() => {
     return previousMonthTransactions.reduce(
@@ -738,642 +813,680 @@ function App() {
     setEditingTransaction(null);
   };
 
-  if (page === "fixed") {
-    return (
-      <main className="app-shell">
-        <section className="page-header">
-          <div>
-            <p className="eyebrow dark">Fixed Transactions</p>
-            <h1>고정 수입/지출 관리</h1>
-            <p className="page-description">월급, 월세, 구독료처럼 매달 반복되는 항목을 등록하면 통계에 자동 반영됩니다.</p>
+  return (
+    <div className="app-container">
+      <header className="global-header">
+        <div className="header-inner">
+          <div className="header-logo" onClick={() => navigateTo("dashboard")}>
+            <span className="logo-icon">💸</span>
+            <span className="logo-title">Ant가계부</span>
           </div>
-          <button className="ghost-button" type="button" onClick={() => navigateTo("dashboard")}>
-            통계로 돌아가기
-          </button>
-        </section>
+          <nav className="global-nav">
+            <button
+              type="button"
+              className={`nav-link ${page === "dashboard" ? "active" : ""}`}
+              onClick={() => navigateTo("dashboard")}
+            >
+              대시보드 통계
+            </button>
+            <button
+              type="button"
+              className={`nav-link ${page === "entry" ? "active" : ""}`}
+              onClick={() => navigateTo("entry")}
+            >
+              수입/지출 입력
+            </button>
+            <button
+              type="button"
+              className={`nav-link ${page === "fixed" ? "active" : ""}`}
+              onClick={() => navigateTo("fixed")}
+            >
+              고정 내역 관리
+            </button>
+          </nav>
+        </div>
+      </header>
 
-        <section className="entry-layout spreadsheet-layout">
-          <form className="panel spreadsheet-panel elevated" onSubmit={handleSaveFixedRows}>
-            <div className="sheet-actions">
+      <div className="page-wrapper">
+        {page === "fixed" && (
+          <main className="app-shell page-transition">
+            <section className="page-header">
               <div>
-                <p>Monthly Template</p>
-                <h2>반복 항목 입력</h2>
-              </div>
-              <button className="ghost-button compact" type="button" onClick={handleAddFixedRow}>
-                행 추가
-              </button>
-            </div>
-
-            <div className="sheet-table-wrap">
-              <table className="sheet-table fixed-sheet-table">
-                <thead>
-                  <tr>
-                    <th>매월 일자</th>
-                    <th>유형</th>
-                    <th>카테고리</th>
-                    <th>금액</th>
-                    <th>메모</th>
-                    <th>삭제</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fixedRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={row.day}
-                          onChange={(event) => handleFixedRowChange(row.id, "day", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={row.type}
-                          onChange={(event) => handleFixedRowChange(row.id, "type", event.target.value)}
-                        >
-                          <option value="expense">지출</option>
-                          <option value="income">수입</option>
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={row.category}
-                          onChange={(event) => handleFixedRowChange(row.id, "category", event.target.value)}
-                        >
-                          {categories[row.type].map((category) => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          min="1"
-                          placeholder="0"
-                          value={row.amount}
-                          onChange={(event) => handleFixedRowChange(row.id, "amount", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          placeholder="예: 월세, 급여, 구독료"
-                          value={row.memo}
-                          onChange={(event) => handleFixedRowChange(row.id, "memo", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <button className="icon-button" type="button" onClick={() => handleRemoveFixedRow(row.id)}>
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="sheet-footer">
-              <span>저장 가능 고정 항목 {validFixedRows.length}개</span>
-              <button className="primary-button" type="submit">
-                고정 항목 저장
-              </button>
-            </div>
-          </form>
-
-          <aside className="entry-aside">
-            <SummaryCard title="고정 수입" value={fixedTotal.income} tone="income" caption="매월 자동 반영될 수입" />
-            <SummaryCard title="고정 지출" value={fixedTotal.expense} tone="expense" caption="매월 자동 반영될 지출" />
-            <SummaryCard title="고정 순액" value={fixedTotal.income - fixedTotal.expense} tone={fixedTotal.income - fixedTotal.expense >= 0 ? "income" : "expense"} caption="고정 수입에서 고정 지출 차감" />
-          </aside>
-        </section>
-      </main>
-    );
-  }
-
-  if (page === "entry") {
-    return (
-      <main className="app-shell">
-        <section className="page-header">
-          <div>
-            <p className="eyebrow dark">New Transaction</p>
-            <h1>수입/지출 입력</h1>
-            <p className="page-description">새 거래를 저장하면 선택한 월의 통계 화면에 바로 반영됩니다.</p>
-          </div>
-          <button className="ghost-button" type="button" onClick={() => navigateTo("dashboard")}>
-            통계로 돌아가기
-          </button>
-        </section>
-
-        <section className="entry-layout spreadsheet-layout">
-          <form className="panel spreadsheet-panel elevated" onSubmit={handleSubmit}>
-            <div className="sheet-actions">
-              <div>
-                <p>Spreadsheet Input</p>
-                <h2>여러 내역을 한 번에 입력</h2>
-              </div>
-              <div className="sheet-button-group">
-                <button
-                  className="upload-action-button"
-                  type="button"
-                  onClick={() => {
-                    resetUploadState();
-                    setIsUploadModalOpen(true);
-                  }}
-                >
-                  UPLOAD
-                </button>
-                <button className="ghost-button compact" type="button" onClick={handleAddRow}>
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="sheet-table-wrap">
-              <table className="sheet-table">
-                <thead>
-                  <tr>
-                    <th>날짜</th>
-                    <th>유형</th>
-                    <th>카테고리</th>
-                    <th>금액</th>
-                    <th>메모</th>
-                    <th>삭제</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entryRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <input
-                          type="date"
-                          value={row.date}
-                          onChange={(event) => handleRowChange(row.id, "date", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={row.type}
-                          onChange={(event) => handleRowChange(row.id, "type", event.target.value)}
-                        >
-                          <option value="expense">지출</option>
-                          <option value="income">수입</option>
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={row.category}
-                          onChange={(event) => handleRowChange(row.id, "category", event.target.value)}
-                        >
-                          {categories[row.type].map((category) => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          min="1"
-                          placeholder="0"
-                          value={row.amount}
-                          onChange={(event) => handleRowChange(row.id, "amount", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          placeholder="메모"
-                          value={row.memo}
-                          onChange={(event) => handleRowChange(row.id, "memo", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <button className="icon-button" type="button" onClick={() => handleRemoveRow(row.id)}>
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="sheet-footer">
-              <div className="sheet-footer-status">
-                <span>저장 가능 행 {validEntryRows.length}개</span>
-                {entrySaveMessage ? <strong>{entrySaveMessage}</strong> : null}
-              </div>
-              <button className="save-button" type="button" onClick={handleSubmit}>
-                저장
-              </button>
-            </div>
-          </form>
-
-          <aside className="entry-aside">
-            <SummaryCard title="이번 달 수입" value={summary.income} tone="income" caption="저장된 수입 합계" />
-            <SummaryCard title="이번 달 지출" value={summary.expense} tone="expense" caption="저장된 지출 합계" />
-            <SummaryCard title="입력 예정 수입" value={draftTotal.income} tone="income" caption="현재 표에 입력된 수입" />
-            <SummaryCard title="입력 예정 지출" value={draftTotal.expense} tone="expense" caption="현재 표에 입력된 지출" />
-            <section className="panel recent-save-panel">
-              <div className="panel-title saved-history-title">
-                <div>
-                  <p>Saved History</p>
-                  <h2>{formatMonthLabel(selectedMonth)} 저장 내역</h2>
-                </div>
-                <button
-                  className="danger-button compact"
-                  type="button"
-                  disabled={selectedMonthManualTransactions.length === 0}
-                  onClick={handleDeleteSelectedMonthTransactions}
-                >
-                  전체삭제
-                </button>
-              </div>
-              <label className="saved-history-month">
-                조회 월
-                <input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(event) => setSelectedMonth(event.target.value)}
-                />
-              </label>
-              {lastSavedRows.length > 0 ? (
-                <div className="recent-save-notice">
-                  방금 저장한 내역 {lastSavedRows.length}건이 반영되었습니다.
-                </div>
-              ) : null}
-              <div className="recent-save-list saved-history-list">
-                {selectedMonthManualTransactions.length === 0 ? (
-                  <p className="empty">저장된 내역이 없습니다.</p>
-                ) : (
-                  selectedMonthManualTransactions.map((row) => (
-                    <div className="recent-save-item saved-history-item" key={row.id}>
-                      <div>
-                        <span>{row.date}</span>
-                        <strong>
-                          {row.type === "income" ? "+" : "-"}
-                          {formatCurrency(row.amount)}
-                        </strong>
-                        <small>
-                          {row.category}
-                          {row.memo ? ` / ${row.memo}` : ""}
-                        </small>
-                      </div>
-                      <button type="button" onClick={() => handleDelete(row.id)}>
-                        삭제
-                      </button>
-                    </div>
-                  ))
-                )}
+                <p className="eyebrow dark">Fixed Transactions</p>
+                <h1>고정 수입/지출 관리</h1>
+                <p className="page-description">월급, 월세, 구독료처럼 매달 반복되는 항목을 등록하면 통계에 자동 반영됩니다.</p>
               </div>
             </section>
-          </aside>
-        </section>
 
-        {isUploadModalOpen ? (
-          <div className="modal-backdrop" role="presentation">
-            <section className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
-              <div className="modal-title">
-                <div>
-                  <p>Excel Import</p>
-                  <h2 id="upload-title">사용내역 엑셀 업로드</h2>
-                </div>
-                <button className="modal-close-button" type="button" onClick={closeUploadModal}>
-                  닫기
-                </button>
-              </div>
-
-              <div className="upload-guide">
-                <strong>업로드 양식</strong>
-                <span>날짜, 유형, 카테고리, 금액, 메모 컬럼을 사용합니다.</span>
-              </div>
-
-              <div className="modal-actions">
-                <button className="ghost-button" type="button" onClick={handleDownloadTemplate}>
-                  엑셀 폼 다운로드
-                </button>
-                <label className="file-upload-button">
-                  파일 선택
-                  <input type="file" accept=".xlsx,.xls" onChange={handleUploadExcel} />
-                </label>
-              </div>
-
-              {uploadMessage ? <p className="upload-message">{uploadMessage}</p> : null}
-
-              {uploadPreview.rows.length > 0 || uploadPreview.invalidRows.length > 0 ? (
-                <div className="upload-preview">
-                  <div className="preview-summary">
-                    <span>반영 가능 {uploadPreview.rows.length}</span>
-                    <span>오류 {uploadPreview.invalidRows.length}</span>
+            <section className="entry-layout spreadsheet-layout">
+              <form className="panel spreadsheet-panel elevated" onSubmit={handleSaveFixedRows}>
+                <div className="sheet-actions">
+                  <div>
+                    <p>Monthly Template</p>
+                    <h2>반복 항목 입력</h2>
                   </div>
-
-                  {uploadPreview.rows.length > 0 ? (
-                    <div className="preview-table-wrap">
-                      <table className="preview-table">
-                        <thead>
-                          <tr>
-                            <th>날짜</th>
-                            <th>유형</th>
-                            <th>카테고리</th>
-                            <th>금액</th>
-                            <th>메모</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {uploadPreview.rows.slice(0, 6).map((row) => (
-                            <tr key={row.id}>
-                              <td>{row.date}</td>
-                              <td>{row.type === "income" ? "수입" : "지출"}</td>
-                              <td>{row.category}</td>
-                              <td>{row.amount}</td>
-                              <td>{row.memo}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : null}
-
-                  <button className="save-button preview-apply-button" type="button" onClick={applyUploadPreview}>
-                    표에 반영
+                  <button className="ghost-button compact" type="button" onClick={handleAddFixedRow}>
+                    행 추가
                   </button>
                 </div>
-              ) : null}
+
+                <div className="sheet-table-wrap">
+                  <table className="sheet-table fixed-sheet-table">
+                    <thead>
+                      <tr>
+                        <th>매월 일자</th>
+                        <th>유형</th>
+                        <th>카테고리</th>
+                        <th>금액</th>
+                        <th>메모</th>
+                        <th>삭제</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fixedRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>
+                            <input
+                              type="number"
+                              min="1"
+                              max="31"
+                              value={row.day}
+                              onChange={(event) => handleFixedRowChange(row.id, "day", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={row.type}
+                              onChange={(event) => handleFixedRowChange(row.id, "type", event.target.value)}
+                            >
+                              <option value="expense">지출</option>
+                              <option value="income">수입</option>
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              value={row.category}
+                              onChange={(event) => handleFixedRowChange(row.id, "category", event.target.value)}
+                            >
+                              {categories[row.type].map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              min="1"
+                              placeholder="0"
+                              value={row.amount}
+                              onChange={(event) => handleFixedRowChange(row.id, "amount", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              placeholder="예: 월세, 급여, 구독료"
+                              value={row.memo}
+                              onChange={(event) => handleFixedRowChange(row.id, "memo", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <button className="icon-button" type="button" onClick={() => handleRemoveFixedRow(row.id)}>
+                              삭제
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="sheet-footer">
+                  <span>저장 가능 고정 항목 {validFixedRows.length}개</span>
+                  <button className="primary-button" type="submit">
+                    고정 항목 저장
+                  </button>
+                </div>
+              </form>
+
+              <aside className="entry-aside">
+                <SummaryCard title="고정 수입" value={fixedTotal.income} tone="income" caption="매월 자동 반영될 수입" />
+                <SummaryCard title="고정 지출" value={fixedTotal.expense} tone="expense" caption="매월 자동 반영될 지출" />
+                <SummaryCard title="고정 순액" value={fixedTotal.income - fixedTotal.expense} tone={fixedTotal.income - fixedTotal.expense >= 0 ? "income" : "expense"} caption="고정 수입에서 고정 지출 차감" />
+              </aside>
             </section>
-          </div>
-        ) : null}
-      </main>
-    );
-  }
+          </main>
+        )}
 
-  return (
-    <main className="app-shell">
-      <section className="hero-panel dashboard-hero">
-        <div className="hero-copy">
-          <p className="eyebrow">Monthly Analytics</p>
-          <h1>이번 달 지출이 어디에 집중됐는지 확인하세요</h1>
-          <p className="hero-description">
-            카테고리별 지출 비중을 비교하고, 수입 대비 지출 흐름을 한 화면에서 점검할 수 있습니다.
-          </p>
-        </div>
+        {page === "entry" && (
+          <main className="app-shell page-transition">
+            <section className="page-header">
+              <div>
+                <p className="eyebrow dark">New Transaction</p>
+                <h1>수입/지출 입력</h1>
+                <p className="page-description">새 거래를 저장하면 선택한 월의 통계 화면에 바로 반영됩니다.</p>
+              </div>
+            </section>
 
-        <div className="balance-card">
-          <span>이번 달 잔액</span>
-          <strong>{formatCurrency(balance)}</strong>
-          <div className="balance-meta">
-            <small>수입 {formatCurrency(summary.income)}</small>
-            <small>지출 {formatCurrency(summary.expense)}</small>
-          </div>
-          <div className="rate-track" aria-label="수입 대비 지출 비율">
-            <span style={{ width: `${spendingRate}%` }} />
-          </div>
-        </div>
-      </section>
-
-      <section className="toolbar">
-        <label className="month-picker">
-          <span>조회 월</span>
-          <div className="month-stepper">
-            <button type="button" aria-label="이전 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, -1))}>
-              ‹
-            </button>
-            <input
-              type="month"
-              value={selectedMonth}
-              aria-label={formatMonthLabel(selectedMonth)}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-            />
-            <button type="button" aria-label="다음 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, 1))}>
-              ›
-            </button>
-          </div>
-        </label>
-        <button className="primary-button compact" type="button" onClick={() => navigateTo("entry")}>
-          내역 추가
-        </button>
-        <button className="fixed-action-button" type="button" onClick={() => navigateTo("fixed")}>
-          <span>고정</span>
-          고정 항목 관리
-        </button>
-      </section>
-
-      <section className="summary-grid" aria-label="월별 요약">
-        <SummaryCard title="수입" value={summary.income} tone="income" caption="이번 달 들어온 금액" />
-        <SummaryCard title="지출" value={summary.expense} tone="expense" caption="이번 달 사용한 금액" />
-        <SummaryCard title="잔액" value={balance} tone={balance >= 0 ? "income" : "expense"} caption="남은 현금 흐름" />
-      </section>
-
-      <section className="comparison-grid" aria-label="전월 대비 비교">
-        <ComparisonCard
-          title="수입 비교"
-          current={summary.income}
-          previous={previousSummary.income}
-          caption={`${formatMonthLabel(previousMonth)} 대비`}
-        />
-        <ComparisonCard
-          title="지출 비교"
-          current={summary.expense}
-          previous={previousSummary.expense}
-          caption={`${formatMonthLabel(previousMonth)} 대비`}
-          inverse
-        />
-      </section>
-
-      <section className="panel report-panel">
-        <div className="panel-title report-title">
-          <div>
-            <p>Monthly Report</p>
-            <h2>{formatMonthLabel(selectedMonth)} 리포트</h2>
-          </div>
-        </div>
-        <div className="report-grid">
-          <ReportItem
-            label="최다 지출 카테고리"
-            value={topCategory ? topCategory.category : "-"}
-            detail={topCategory ? formatCurrency(topCategory.amount) : "지출 내역 없음"}
-          />
-          <ReportItem
-            label="전월 대비 증가"
-            value={mostIncreasedCategory ? mostIncreasedCategory.category : "-"}
-            detail={mostIncreasedCategory ? `+${formatCurrency(mostIncreasedCategory.amount)}` : "증가한 카테고리 없음"}
-          />
-          <ReportItem
-            label="고정 지출 비중"
-            value={`${fixedExpenseRate.toFixed(1)}%`}
-            detail={
-              fixedExpenseRate >= 50
-                ? `${formatCurrency(fixedExpenseTotal)} 고정비 주의`
-                : `${formatCurrency(fixedExpenseTotal)} / 변동 ${formatCurrency(variableExpenseTotal)}`
-            }
-            tone={fixedExpenseRate >= 50 ? "warning" : "normal"}
-          />
-        </div>
-      </section>
-
-      <section className="analytics-grid">
-        <section className="panel main-chart-panel">
-          <div className="panel-title">
-            <div>
-              <p>Spending Ranking</p>
-              <h2>카테고리별 지출 비교</h2>
-            </div>
-            {topCategory ? <strong className="top-badge">최다 지출: {topCategory.category}</strong> : null}
-          </div>
-
-          <div className="comparison-chart">
-            {categorySummary.length === 0 ? (
-              <p className="empty">이 달의 지출이 없습니다.</p>
-            ) : (
-              categorySummary.map((item) => {
-                const percent = summary.expense > 0 ? (item.amount / summary.expense) * 100 : 0;
-                const width = (item.amount / maxCategoryAmount) * 100;
-
-                return (
-                  <div className="comparison-row" key={item.category}>
-                    <div className="comparison-label">
-                      <span className="legend-dot" style={{ background: item.color }} />
-                      <strong>{item.category}</strong>
-                      <small>{percent.toFixed(1)}%</small>
-                    </div>
-                    <div className="comparison-track">
-                      <span style={{ width: `${width}%`, background: item.color }} />
-                    </div>
-                    <strong className="comparison-amount">{formatCurrency(item.amount)}</strong>
+            <section className="entry-layout spreadsheet-layout">
+              <form className="panel spreadsheet-panel elevated" onSubmit={handleSubmit}>
+                <div className="sheet-actions">
+                  <div>
+                    <p>Spreadsheet Input</p>
+                    <h2>여러 내역을 한 번에 입력</h2>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </section>
+                  <div className="sheet-button-group">
+                    <button
+                      className="upload-action-button"
+                      type="button"
+                      onClick={() => {
+                        resetUploadState();
+                        setIsUploadModalOpen(true);
+                      }}
+                    >
+                      UPLOAD
+                    </button>
+                    <button className="ghost-button compact" type="button" onClick={handleAddRow}>
+                      +
+                    </button>
+                  </div>
+                </div>
 
-        <aside className="panel insight-panel">
-          <div className="panel-title">
-            <div>
-              <p>Quick Insight</p>
-              <h2>소비 요약</h2>
-            </div>
-          </div>
-          <div className="insight-list">
-            <InsightItem label="수입 대비 지출" value={`${spendingRate.toFixed(1)}%`} />
-            <InsightItem label="지출 카테고리 수" value={`${categorySummary.length}개`} />
-            <InsightItem label="가장 큰 지출" value={topCategory ? formatCurrency(topCategory.amount) : "-"} />
-          </div>
-        </aside>
-      </section>
+                <div className="sheet-table-wrap">
+                  <table className="sheet-table">
+                    <thead>
+                      <tr>
+                        <th>날짜</th>
+                        <th>유형</th>
+                        <th>카테고리</th>
+                        <th>금액</th>
+                        <th>메모</th>
+                        <th>삭제</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entryRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>
+                            <input
+                              type="date"
+                              value={row.date}
+                              onChange={(event) => handleRowChange(row.id, "date", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={row.type}
+                              onChange={(event) => handleRowChange(row.id, "type", event.target.value)}
+                            >
+                              <option value="expense">지출</option>
+                              <option value="income">수입</option>
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              value={row.category}
+                              onChange={(event) => handleRowChange(row.id, "category", event.target.value)}
+                            >
+                              {categories[row.type].map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              min="1"
+                              placeholder="0"
+                              value={row.amount}
+                              onChange={(event) => handleRowChange(row.id, "amount", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              placeholder="메모"
+                              value={row.memo}
+                              onChange={(event) => handleRowChange(row.id, "memo", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <button className="icon-button" type="button" onClick={() => handleRemoveRow(row.id)}>
+                              삭제
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-      <section className="panel transactions-panel">
-        <div className="panel-title transactions-title">
-          <div>
-            <p>History</p>
-            <h2>최근 거래 내역</h2>
-          </div>
-          <button className="collapse-button" type="button" onClick={() => setIsTransactionsOpen((open) => !open)}>
-            {isTransactionsOpen ? "접기" : `펼치기 (${monthTransactions.length})`}
-          </button>
-        </div>
+                <div className="sheet-footer">
+                  <div className="sheet-footer-status">
+                    <span>저장 가능 행 {validEntryRows.length}개</span>
+                    {entrySaveMessage ? <strong>{entrySaveMessage}</strong> : null}
+                  </div>
+                  <button className="save-button" type="button" onClick={handleSubmit}>
+                    저장
+                  </button>
+                </div>
+              </form>
 
-        {isTransactionsOpen ? (
-          <>
-          <div className="transaction-filter-panel">
-            <div className="filter-buttons" aria-label="거래 유형 필터">
-              <button type="button" className={filterType === "all" ? "active" : ""} onClick={() => setFilterType("all")}>
-                전체
-              </button>
-              <button type="button" className={filterType === "expense" ? "active" : ""} onClick={() => setFilterType("expense")}>
-                지출
-              </button>
-              <button type="button" className={filterType === "income" ? "active" : ""} onClick={() => setFilterType("income")}>
-                수입
-              </button>
-            </div>
-            <div className="transaction-filter-grid">
-              <label>
-                검색
-                <input
-                  type="search"
-                  placeholder="메모, 카테고리, 금액"
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                />
-              </label>
-              <label>
-                카테고리
-                <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
-                  <option value="all">전체 카테고리</option>
-                  {[...new Set([...categories.expense, ...categories.income])].map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                정렬
-                <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
-                  <option value="latest">최신순</option>
-                  <option value="amount-desc">금액 높은순</option>
-                  <option value="amount-asc">금액 낮은순</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div className="transaction-list">
-            {monthTransactions.length === 0 ? (
-              <p className="empty">조건에 맞는 내역이 없습니다.</p>
-            ) : (
-              monthTransactions.map((transaction) => (
-                <article className="transaction-item" key={transaction.id}>
-                  <div className="transaction-main">
-                    <span className={`type-dot ${transaction.type}`} />
+              <aside className="entry-aside">
+                <SummaryCard title="이번 달 수입" value={summary.income} tone="income" caption="저장된 수입 합계" />
+                <SummaryCard title="이번 달 지출" value={summary.expense} tone="expense" caption="저장된 지출 합계" />
+                <SummaryCard title="입력 예정 수입" value={draftTotal.income} tone="income" caption="현재 표에 입력된 수입" />
+                <SummaryCard title="입력 예정 지출" value={draftTotal.expense} tone="expense" caption="현재 표에 입력된 지출" />
+                <section className="panel recent-save-panel">
+                  <div className="panel-title saved-history-title">
                     <div>
-                      <strong>{transaction.category}</strong>
-                      <p>
-                        {transaction.fixed ? "고정 항목 / " : ""}
-                        {transaction.date}
-                        {transaction.memo ? ` / ${transaction.memo}` : ""}
-                      </p>
+                      <p>Saved History</p>
+                      <h2>{formatMonthLabel(selectedMonth)} 저장 내역</h2>
                     </div>
+                    <button
+                      className="danger-button compact"
+                      type="button"
+                      disabled={selectedMonthManualTransactions.length === 0}
+                      onClick={handleDeleteSelectedMonthTransactions}
+                    >
+                      전체삭제
+                    </button>
                   </div>
-                  <div className="transaction-side">
-                    <strong className={transaction.type}>
-                      {transaction.type === "expense" ? "-" : "+"}
-                      {formatCurrency(transaction.amount)}
-                    </strong>
-                    {transaction.fixed ? (
-                      <button type="button" onClick={() => navigateTo("fixed")}>
-                        관리
-                      </button>
+                  <label className="saved-history-month">
+                    조회 월
+                    <input
+                      type="month"
+                      value={selectedMonth}
+                      onChange={(event) => setSelectedMonth(event.target.value)}
+                    />
+                  </label>
+                  {lastSavedRows.length > 0 ? (
+                    <div className="recent-save-notice">
+                      방금 저장한 내역 {lastSavedRows.length}건이 반영되었습니다.
+                    </div>
+                  ) : null}
+                  <div className="recent-save-list saved-history-list">
+                    {selectedMonthManualTransactions.length === 0 ? (
+                      <p className="empty">저장된 내역이 없습니다.</p>
                     ) : (
-                      <>
-                        <button type="button" onClick={() => openEditModal(transaction)}>
-                          수정
-                        </button>
-                        <button type="button" onClick={() => handleDelete(transaction.id)}>
-                          삭제
-                        </button>
-                      </>
+                      selectedMonthManualTransactions.map((row) => (
+                        <div className="recent-save-item saved-history-item" key={row.id}>
+                          <div>
+                            <span>{row.date}</span>
+                            <strong>
+                              {row.type === "income" ? "+" : "-"}
+                              {formatCurrency(row.amount)}
+                            </strong>
+                            <small>
+                              {row.category}
+                              {row.memo ? ` / ${row.memo}` : ""}
+                            </small>
+                          </div>
+                          <button type="button" onClick={() => handleDelete(row.id)}>
+                            삭제
+                          </button>
+                        </div>
+                      ))
                     )}
                   </div>
-                </article>
-              ))
-            )}
-          </div>
-          </>
-        ) : (
-          <p className="collapsed-summary">
-            현재 조건에 맞는 거래 {monthTransactions.length}개가 접혀 있습니다.
-          </p>
+                </section>
+              </aside>
+            </section>
+
+            {isUploadModalOpen ? (
+              <div className="modal-backdrop" role="presentation">
+                <section className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
+                  <div className="modal-title">
+                    <div>
+                      <p>Excel Import</p>
+                      <h2 id="upload-title">사용내역 엑셀 업로드</h2>
+                    </div>
+                    <button className="modal-close-button" type="button" onClick={closeUploadModal}>
+                      닫기
+                    </button>
+                  </div>
+
+                  <div className="upload-guide">
+                    <strong>업로드 양식</strong>
+                    <span>날짜, 유형, 카테고리, 금액, 메모 컬럼을 사용합니다.</span>
+                  </div>
+
+                  <div className="modal-actions">
+                    <button className="ghost-button" type="button" onClick={handleDownloadTemplate}>
+                      엑셀 폼 다운로드
+                    </button>
+                    <label className="file-upload-button">
+                      파일 선택
+                      <input type="file" accept=".xlsx,.xls" onChange={handleUploadExcel} />
+                    </label>
+                  </div>
+
+                  {uploadMessage ? <p className="upload-message">{uploadMessage}</p> : null}
+
+                  {uploadPreview.rows.length > 0 || uploadPreview.invalidRows.length > 0 ? (
+                    <div className="upload-preview">
+                      <div className="preview-summary">
+                        <span>반영 가능 {uploadPreview.rows.length}</span>
+                        <span>오류 {uploadPreview.invalidRows.length}</span>
+                      </div>
+
+                      {uploadPreview.rows.length > 0 ? (
+                        <div className="preview-table-wrap">
+                          <table className="preview-table">
+                            <thead>
+                              <tr>
+                                <th>날짜</th>
+                                <th>유형</th>
+                                <th>카테고리</th>
+                                <th>금액</th>
+                                <th>메모</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {uploadPreview.rows.slice(0, 6).map((row) => (
+                                <tr key={row.id}>
+                                  <td>{row.date}</td>
+                                  <td>{row.type === "income" ? "수입" : "지출"}</td>
+                                  <td>{row.category}</td>
+                                  <td>{row.amount}</td>
+                                  <td>{row.memo}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : null}
+
+                      <button className="save-button preview-apply-button" type="button" onClick={applyUploadPreview}>
+                        표에 반영
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+              </div>
+            ) : null}
+          </main>
         )}
-      </section>
+
+        {page === "dashboard" && (
+          <main className="app-shell page-transition">
+            <section className="hero-panel dashboard-hero">
+              <div className="hero-copy">
+                <p className="eyebrow">Monthly Analytics</p>
+                <h1>이번 달 지출이 어디에 집중됐는지 확인하세요</h1>
+                <p className="hero-description">
+                  카테고리별 지출 비중을 비교하고, 수입 대비 지출 흐름을 한 화면에서 점검할 수 있습니다.
+                </p>
+              </div>
+
+              <div className="balance-card">
+                <span>이번 달 잔액</span>
+                <strong>{formatCurrency(balance)}</strong>
+                <div className="balance-meta">
+                  <small>수입 {formatCurrency(summary.income)}</small>
+                  <small>지출 {formatCurrency(summary.expense)}</small>
+                </div>
+                <div className="rate-track" aria-label="수입 대비 지출 비율">
+                  <span style={{ width: `${spendingRate}%` }} />
+                </div>
+              </div>
+            </section>
+
+            <section className="toolbar">
+              <label className="month-picker">
+                <span>조회 월</span>
+                <div className="month-stepper">
+                  <button type="button" aria-label="이전 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, -1))}>
+                    ‹
+                  </button>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    aria-label={formatMonthLabel(selectedMonth)}
+                    onChange={(event) => setSelectedMonth(event.target.value)}
+                  />
+                  <button type="button" aria-label="다음 달" onClick={() => setSelectedMonth((month) => shiftMonthKey(month, 1))}>
+                    ›
+                  </button>
+                </div>
+              </label>
+              <button className="primary-button compact" type="button" onClick={() => navigateTo("entry")}>
+                내역 추가
+              </button>
+              <button className="fixed-action-button" type="button" onClick={() => navigateTo("fixed")}>
+                <span>고정</span>
+                고정 항목 관리
+              </button>
+            </section>
+
+            <section className="summary-grid" aria-label="월별 요약">
+              <SummaryCard title="수입" value={summary.income} tone="income" caption="이번 달 들어온 금액" />
+              <SummaryCard title="지출" value={summary.expense} tone="expense" caption="이번 달 사용한 금액" />
+              <SummaryCard title="잔액" value={balance} tone={balance >= 0 ? "income" : "expense"} caption="남은 현금 흐름" />
+            </section>
+
+            <section className="comparison-grid" aria-label="전월 대비 비교">
+              <ComparisonCard
+                title="수입 비교"
+                current={summary.income}
+                previous={previousSummary.income}
+                caption={`${formatMonthLabel(previousMonth)} 대비`}
+              />
+              <ComparisonCard
+                title="지출 비교"
+                current={summary.expense}
+                previous={previousSummary.expense}
+                caption={`${formatMonthLabel(previousMonth)} 대비`}
+                inverse
+              />
+            </section>
+
+            <section className="panel trend-panel">
+              <div className="panel-title">
+                <div>
+                  <p>Monthly Trend</p>
+                  <h2>최근 6개월 소비 흐름</h2>
+                </div>
+              </div>
+              <MonthlyTrendChart data={monthlyTrendData} />
+            </section>
+
+            <section className="panel report-panel">
+              <div className="panel-title report-title">
+                <div>
+                  <p>Monthly Report</p>
+                  <h2>{formatMonthLabel(selectedMonth)} 리포트</h2>
+                </div>
+              </div>
+              <div className="report-grid">
+                <ReportItem
+                  label="최다 지출 카테고리"
+                  value={topCategory ? topCategory.category : "-"}
+                  detail={topCategory ? formatCurrency(topCategory.amount) : "지출 내역 없음"}
+                />
+                <ReportItem
+                  label="전월 대비 증가"
+                  value={mostIncreasedCategory ? mostIncreasedCategory.category : "-"}
+                  detail={mostIncreasedCategory ? `+${formatCurrency(mostIncreasedCategory.amount)}` : "증가한 카테고리 없음"}
+                />
+                <ReportItem
+                  label="고정 지출 비중"
+                  value={`${fixedExpenseRate.toFixed(1)}%`}
+                  detail={
+                    fixedExpenseRate >= 50
+                      ? `${formatCurrency(fixedExpenseTotal)} 고정비 주의`
+                      : `${formatCurrency(fixedExpenseTotal)} / 변동 ${formatCurrency(variableExpenseTotal)}`
+                  }
+                  tone={fixedExpenseRate >= 50 ? "warning" : "normal"}
+                />
+              </div>
+            </section>
+
+            <section className="analytics-grid">
+              <section className="panel main-chart-panel">
+                <div className="panel-title">
+                  <div>
+                    <p>Spending Ranking</p>
+                    <h2>카테고리별 지출 비교</h2>
+                  </div>
+                  {topCategory ? <strong className="top-badge">최다 지출: {topCategory.category}</strong> : null}
+                </div>
+
+                <div className="comparison-chart">
+                  {categorySummary.length === 0 ? (
+                    <p className="empty">이 달의 지출이 없습니다.</p>
+                  ) : (
+                    categorySummary.map((item) => {
+                      const percent = summary.expense > 0 ? (item.amount / summary.expense) * 100 : 0;
+                      const width = (item.amount / maxCategoryAmount) * 100;
+
+                      return (
+                        <div className="comparison-row" key={item.category}>
+                          <div className="comparison-label">
+                            <span className="legend-dot" style={{ background: item.color }} />
+                            <strong>{item.category}</strong>
+                            <small>{percent.toFixed(1)}%</small>
+                          </div>
+                          <div className="comparison-track">
+                            <span style={{ width: `${width}%`, background: item.color }} />
+                          </div>
+                          <strong className="comparison-amount">{formatCurrency(item.amount)}</strong>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <aside className="panel insight-panel">
+                <div className="panel-title">
+                  <div>
+                    <p>Quick Insight</p>
+                    <h2>소비 요약</h2>
+                  </div>
+                </div>
+                <div className="insight-list">
+                  <InsightItem label="수입 대비 지출" value={`${spendingRate.toFixed(1)}%`} />
+                  <InsightItem label="지출 카테고리 수" value={`${categorySummary.length}개`} />
+                  <InsightItem label="가장 큰 지출" value={topCategory ? formatCurrency(topCategory.amount) : "-"} />
+                </div>
+              </aside>
+            </section>
+
+            <section className="panel transactions-panel">
+              <div className="panel-title transactions-title">
+                <div>
+                  <p>History</p>
+                  <h2>최근 거래 내역</h2>
+                </div>
+                <button className="collapse-button" type="button" onClick={() => setIsTransactionsOpen((open) => !open)}>
+                  {isTransactionsOpen ? "접기" : `펼치기 (${monthTransactions.length})`}
+                </button>
+              </div>
+
+              {isTransactionsOpen ? (
+                <>
+                <div className="transaction-filter-panel">
+                  <div className="filter-buttons" aria-label="거래 유형 필터">
+                    <button type="button" className={filterType === "all" ? "active" : ""} onClick={() => setFilterType("all")}>
+                      전체
+                    </button>
+                    <button type="button" className={filterType === "expense" ? "active" : ""} onClick={() => setFilterType("expense")}>
+                      지출
+                    </button>
+                    <button type="button" className={filterType === "income" ? "active" : ""} onClick={() => setFilterType("income")}>
+                      수입
+                    </button>
+                  </div>
+                  <div className="transaction-filter-grid">
+                    <label>
+                      검색
+                      <input
+                        type="search"
+                        placeholder="메모, 카테고리, 금액"
+                        value={searchText}
+                        onChange={(event) => setSearchText(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      카테고리
+                      <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+                        <option value="all">전체 카테고리</option>
+                        {[...new Set([...categories.expense, ...categories.income])].map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      정렬
+                      <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+                        <option value="latest">최신순</option>
+                        <option value="amount-desc">금액 높은순</option>
+                        <option value="amount-asc">금액 낮은순</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="transaction-list">
+                  {monthTransactions.length === 0 ? (
+                    <p className="empty">조건에 맞는 내역이 없습니다.</p>
+                  ) : (
+                    monthTransactions.map((transaction) => (
+                      <article className="transaction-item" key={transaction.id}>
+                        <div className="transaction-main">
+                          <span className={`type-dot ${transaction.type}`} />
+                          <div>
+                            <strong>{transaction.category}</strong>
+                            <p>
+                              {transaction.fixed ? "고정 항목 / " : ""}
+                              {transaction.date}
+                              {transaction.memo ? ` / ${transaction.memo}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="transaction-side">
+                          <strong className={transaction.type}>
+                            {transaction.type === "expense" ? "-" : "+"}
+                            {formatCurrency(transaction.amount)}
+                          </strong>
+                          {transaction.fixed ? (
+                            <button type="button" onClick={() => navigateTo("fixed")}>
+                              관리
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => openEditModal(transaction)}>
+                                수정
+                              </button>
+                              <button type="button" onClick={() => handleDelete(transaction.id)}>
+                                삭제
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+                </>
+              ) : (
+                <p className="collapsed-summary">
+                  현재 조건에 맞는 거래 {monthTransactions.length}개가 접혀 있습니다.
+                </p>
+              )}
+            </section>
+          </main>
+        )}
+      </div>
 
       {editingTransaction ? (
         <div className="modal-backdrop" role="presentation">
@@ -1452,7 +1565,7 @@ function App() {
           </section>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }
 
